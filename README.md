@@ -4,7 +4,7 @@ A modern, modular static web app for **GitHub Pages** to manage proxy definition
 
 ## What is implemented now
 
-- Xray-first modular architecture (Sing-box and Mihomo are ready as future engines).
+- Modular architecture with active Xray and Mihomo engines (Sing-box is ready for next phase).
 - Schema-driven editor with protocol-aware fields and protocol-specific transport options.
 - Editor layout: **main fields first**, then **optional fields**.
 - Import proxies from plain text or Base64 payloads.
@@ -14,6 +14,9 @@ A modern, modular static web app for **GitHub Pages** to manage proxy definition
   - file (`.txt`, `.json`, `.conf`)
   - subscription URL payload
 - Supports parsing common links: `vless`, `vmess`, `trojan`, `ss`, `socks`, `wireguard`, `hysteria2` and WireGuard INI-like `.conf` blocks.
+- Mihomo support (proxy catalogs and inbounds catalog) is added.
+- Mihomo proxy catalog now includes: direct, dns, http, socks5, ss, ssr, snell, vmess, vless, trojan, anytls, mieru, sudoku, hysteria, hysteria2, tuic, wg, ssh, masque; inbound listeners are also cataloged.
+- When current engine is Mihomo, output export is generated as Mihomo YAML (`proxies:` list), including conversion from imported Xray-like rows.
 - Pagination with configurable rows-per-page.
 - Row selection with checkboxes, including Select All (filtered) and Clear Selection.
 - Bulk actions: rename selected/all, delete selected, and optional unique incremental numbering (`1-prefix`, `2-prefix`, ...).
