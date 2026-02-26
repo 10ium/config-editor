@@ -284,13 +284,14 @@ function bindEvents(state, render) {
   on('importFile', () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.txt,.json,.conf';
+    input.accept = '.txt,.json,.conf,.yaml,.yml';
     input.addEventListener('change', async () => {
       const [file] = input.files || [];
       if (!file) return;
       const text = await file.text();
+      const lowerName = file.name.toLowerCase();
       try {
-        const rows = file.name.endsWith('.json') ? normalizeRows(JSON.parse(text)) : parseFlexibleInput(text);
+        const rows = lowerName.endsWith('.json') ? normalizeRows(JSON.parse(text)) : parseFlexibleInput(text);
         state.rows = mergeRows(state.rows, adaptRowsToEngine(rows, state.engineId));
         state.importText = text;
         persist(state);
@@ -463,7 +464,11 @@ function getAllowedTransportOptions(engine, protocolSchema) {
 }
 
 function getTransportSchema(engine, transportId) {
-  return engine.protocols.transports.find((item) => item.id === transportId) ?? { primaryFields: [], optionalFields: [] };
+  return {
+    primaryFields: [],
+    optionalFields: [],
+    ...(engine.protocols.transports.find((item) => item.id === transportId) ?? {})
+  };
 }
 
 function filterRows(rows, state) {
