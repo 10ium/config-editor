@@ -57,11 +57,62 @@ function parseUri(input) {
   const scheme = (clean.split('://')[0] || '').toLowerCase();
   if (!SUPPORTED_SCHEMES.has(scheme)) return null;
 
+  if (scheme === 'vmess') return parseVmess(clean);
   if (scheme === 'ss') return parseSs(clean);
   if (scheme === 'socks') return parseSocks(clean);
   if (scheme === 'wireguard') return parseWireguard(clean);
   if (scheme === 'hysteria2' || scheme === 'hysteria') return parseHysteria(clean);
   return parseUrlLike(clean, scheme);
+}
+
+function parseVmess(input) {
+  const payload = input.slice('vmess://'.length);
+  const decoded = tryDecodeBase64(payload);
+  if (!decoded) {
+    return parseUrlLike(input, 'vmess');
+  }
+
+  try {
+    const json = JSON.parse(decoded);
+    const net = String(json.net || 'tcp').toLowerCase();
+    const tlsRaw = String(json.tls || '').toLowerCase();
+    const security = tlsRaw && tlsRaw !== 'none' ? tlsRaw : 'none';
+    return {
+      id: createId(),
+      engineId: 'xray',
+      name: json.ps || json.name || `vmess-${json.add || 'node'}`,
+      direction: 'outbound',
+      protocolId: 'vmess',
+      transportId: normalizeTransport(net),
+      mainConfig: {
+        server: String(json.add || ''),
+        port: Number(json.port || 0),
+        id: String(json.id || ''),
+        alterId: String(json.aid ?? json.alterId ?? '0'),
+        security: String(json.scy || json.security || 'auto')
+      },
+      optionalConfig: {
+        security,
+        sni: String(json.sni || ''),
+        alpn: String(json.alpn || ''),
+        fp: String(json.fp || ''),
+        host: String(json.host || ''),
+        path: String(json.path || ''),
+        type: String(json.type || ''),
+        allowInsecure: String(json.allowInsecure ?? json.insecure ?? '')
+      },
+      transportMain: {
+        path: String(json.path || ''),
+        serviceName: String(json.serviceName || '')
+      },
+      transportOptional: {
+        host: String(json.host || ''),
+        type: String(json.type || '')
+      }
+    };
+  } catch {
+    return null;
+  }
 }
 
 function parseUrlLike(input, scheme) {
@@ -87,7 +138,7 @@ function parseUrlLike(input, scheme) {
     }
 
     const optionalConfig = {};
-    copyQuery(q, optionalConfig, ['security', 'sni', 'alpn', 'fp', 'flow', 'insecure', 'allowInsecure', 'host', 'headerType', 'obfs', 'obfs-password']);
+    copyQuery(q, optionalConfig, ['security', 'sni', 'alpn', 'fp', 'flow', 'insecure', 'allowInsecure', 'host', 'headerType', 'obfs', 'obfs-password', 'pbk', 'sid']);
 
     const transportMain = {};
     const transportOptional = {};
