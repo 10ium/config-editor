@@ -15,11 +15,12 @@ A modern, modular static web app for **GitHub Pages** to manage proxy definition
   - subscription URL payload
 - Supports parsing common links: `vless`, `vmess`, `trojan`, `ss`, `socks`, `wireguard`, `hysteria2` and WireGuard INI-like `.conf` blocks.
 - Pagination with configurable rows-per-page.
-- Row selection with checkboxes for bulk actions.
-- Bulk rename for selected/all rows with optional unique incremental numbering (`1-prefix`, `2-prefix`, ...).
+- Row selection with checkboxes, including Select All (filtered) and Clear Selection.
+- Bulk actions: rename selected/all, delete selected, and optional unique incremental numbering (`1-prefix`, `2-prefix`, ...).
 - Output options:
   - copy selected/all rows to clipboard
   - download selected/all rows to file (`proxies.txt`)
+- Table UI is hardened for long values (ellipsis/truncation) to prevent layout breaking.
 - GitHub Pages friendly and includes favicon.
 
 ## Run locally
