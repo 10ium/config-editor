@@ -24,6 +24,7 @@ const dictionaries = {
     mainFields: 'Main fields',
     optionalFields: 'Optional fields',
     transport: 'Transport',
+    security: 'Security',
     importPlaceholder: 'Paste plain text, proxy links, WireGuard .conf, or Base64 payload here',
     importFromText: 'Parse Text/Base64',
     importClipboard: 'Import Clipboard',
