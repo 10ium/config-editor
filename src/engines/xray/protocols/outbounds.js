@@ -102,9 +102,11 @@ export const xrayOutbounds = [
       { key: 'password', label: 'Password', type: 'text' }
     ],
     optionalFields: [
+      { key: 'security', label: 'Security', type: 'select', options: [{ value: 'none', label: 'none' }, { value: 'tls', label: 'tls' }, { value: 'reality', label: 'reality' }] },
       { key: 'flow', label: 'Flow', type: 'text' },
       { key: 'sni', label: 'SNI', type: 'text' },
-      { key: 'fingerprint', label: 'uTLS Fingerprint', type: 'select', options: [{ value: 'chrome', label: 'chrome' }, { value: 'firefox', label: 'firefox' }, { value: 'safari', label: 'safari' }, { value: 'edge', label: 'edge' }] }
+      { key: 'fp', label: 'uTLS Fingerprint', type: 'select', options: [{ value: 'chrome', label: 'chrome' }, { value: 'firefox', label: 'firefox' }, { value: 'safari', label: 'safari' }, { value: 'edge', label: 'edge' }, { value: 'random', label: 'random' }] },
+      { key: 'alpn', label: 'ALPN', type: 'text' }
     ]
   },
   {
@@ -116,9 +118,14 @@ export const xrayOutbounds = [
       { key: 'id', label: 'UUID', type: 'text' }
     ],
     optionalFields: [
+      { key: 'security', label: 'Security', type: 'select', options: [{ value: 'none', label: 'none' }, { value: 'tls', label: 'tls' }, { value: 'reality', label: 'reality' }] },
       { key: 'encryption', label: 'Encryption', type: 'text', placeholder: 'none' },
       { key: 'flow', label: 'Flow', type: 'text', placeholder: 'xtls-rprx-vision' },
-      { key: 'sni', label: 'SNI', type: 'text' }
+      { key: 'sni', label: 'SNI', type: 'text' },
+      { key: 'fp', label: 'uTLS Fingerprint', type: 'text' },
+      { key: 'alpn', label: 'ALPN', type: 'text' },
+      { key: 'pbk', label: 'Reality Public Key (pbk)', type: 'text' },
+      { key: 'sid', label: 'Reality Short ID (sid)', type: 'text' }
     ]
   },
   {
@@ -130,8 +137,12 @@ export const xrayOutbounds = [
       { key: 'id', label: 'UUID', type: 'text' }
     ],
     optionalFields: [
+      { key: 'security', label: 'Security', type: 'select', options: [{ value: 'none', label: 'none' }, { value: 'tls', label: 'tls' }, { value: 'reality', label: 'reality' }] },
+      { key: 'scy', label: 'Cipher (scy)', type: 'select', options: [{ value: 'auto', label: 'auto' }, { value: 'aes-128-gcm', label: 'aes-128-gcm' }, { value: 'chacha20-poly1305', label: 'chacha20-poly1305' }, { value: 'none', label: 'none' }] },
       { key: 'alterId', label: 'AlterId', type: 'number', defaultValue: 0 },
-      { key: 'security', label: 'Security', type: 'select', options: [{ value: 'auto', label: 'auto' }, { value: 'aes-128-gcm', label: 'aes-128-gcm' }, { value: 'chacha20-poly1305', label: 'chacha20-poly1305' }, { value: 'none', label: 'none' }] },
+      { key: 'sni', label: 'SNI', type: 'text' },
+      { key: 'alpn', label: 'ALPN', type: 'text' },
+      { key: 'fp', label: 'uTLS Fingerprint', type: 'text' },
       { key: 'globalPadding', label: 'Global Padding', type: 'select', options: bool }
     ]
   },
