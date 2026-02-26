@@ -24,6 +24,9 @@ export function parseFlexibleInput(text) {
     if (parsedLineDecoded.length) return parsedLineDecoded;
   }
 
+  const fromYaml = parseMihomoYaml(text);
+  if (fromYaml.length) return fromYaml;
+
   return [];
 }
 
@@ -49,6 +52,166 @@ export function parseSubscriptionPayload(text) {
   const decoded = tryDecodeBase64(trimmed);
   const source = decoded && decoded.includes('://') ? decoded : text;
   return parseMixedInput(source);
+}
+
+function parseMihomoYaml(text) {
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  let inProxies = false;
+  let current = null;
+
+  for (const raw of lines) {
+    const line = raw.replace(/	/g, '  ');
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    if (!inProxies) {
+      if (/^proxies\s*:\s*$/.test(trimmed)) inProxies = true;
+      continue;
+    }
+
+    if (/^[A-Za-z0-9_-]+\s*:\s*$/.test(trimmed) && !trimmed.startsWith('-')) {
+      if (current) rows.push(yamlProxyToRow(current));
+      current = null;
+      break;
+    }
+
+    if (/^\s*-\s+/.test(line)) {
+      if (current) rows.push(yamlProxyToRow(current));
+      current = {};
+      const rest = line.replace(/^\s*-\s+/, '');
+      const kv = parseYamlKeyValue(rest);
+      if (kv) current[kv.key] = kv.value;
+      continue;
+    }
+
+    if (!current) continue;
+    const kv = parseYamlKeyValue(trimmed);
+    if (kv) current[kv.key] = kv.value;
+  }
+
+  if (current) rows.push(yamlProxyToRow(current));
+  return dedupeRows(rows.filter(Boolean));
+}
+
+function parseYamlKeyValue(line) {
+  const idx = line.indexOf(':');
+  if (idx < 0) return null;
+  const key = line.slice(0, idx).trim();
+  const value = parseYamlScalar(line.slice(idx + 1).trim());
+  if (!key) return null;
+  return { key, value };
+}
+
+function parseYamlScalar(value) {
+  if (!value) return '';
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  const lowered = value.toLowerCase();
+  if (lowered === 'true') return 'true';
+  if (lowered === 'false') return 'false';
+  if (/^-?\d+$/.test(value)) return Number(value);
+  if (value.startsWith('[') && value.endsWith(']')) return value.slice(1, -1);
+  return value;
+}
+
+function yamlProxyToRow(proxy) {
+  const type = String(proxy.type || '').toLowerCase();
+  if (!type) return null;
+
+  const mappedProtocol = mapMihomoTypeToProtocol(type);
+  const mappedTransport = mapMihomoNetworkToTransport(proxy.network);
+  const mainConfig = {
+    server: String(proxy.server || ''),
+    port: Number(proxy.port || 0) || ''
+  };
+  const optionalConfig = {};
+  const transportMain = {};
+  const transportOptional = {};
+
+  if (type === 'vless' || type === 'vmess') {
+    mainConfig.id = String(proxy.uuid || proxy.id || '');
+    if (proxy.cipher) optionalConfig.scy = String(proxy.cipher);
+    if (proxy.sni || proxy.servername) optionalConfig.sni = String(proxy.sni || proxy.servername);
+    if (proxy.alpn) optionalConfig.alpn = String(proxy.alpn);
+    if (proxy['client-fingerprint']) optionalConfig.fp = String(proxy['client-fingerprint']);
+  }
+
+  if (type === 'trojan' || type === 'anytls') {
+    mainConfig.password = String(proxy.password || '');
+    if (proxy.sni) optionalConfig.sni = String(proxy.sni);
+    if (proxy.alpn) optionalConfig.alpn = String(proxy.alpn);
+  }
+
+  if (type === 'ss' || type === 'ssr') {
+    mainConfig.method = String(proxy.cipher || '');
+    mainConfig.password = String(proxy.password || '');
+  }
+
+  if (type === 'socks5' || type === 'http') {
+    if (proxy.username) optionalConfig.user = String(proxy.username);
+    if (proxy.password) optionalConfig.pass = String(proxy.password);
+  }
+
+  if (type === 'hysteria2') {
+    mainConfig.auth = String(proxy.password || proxy.auth || '');
+    if (proxy.sni) optionalConfig.sni = String(proxy.sni);
+  }
+
+  if (type === 'tuic') {
+    mainConfig.id = String(proxy.uuid || '');
+    mainConfig.password = String(proxy.password || '');
+    if (proxy.sni) optionalConfig.sni = String(proxy.sni);
+    if (proxy.alpn) optionalConfig.alpn = String(proxy.alpn);
+  }
+
+  if (type === 'wg') {
+    mainConfig.secretKey = String(proxy['private-key'] || '');
+    mainConfig.publicKey = String(proxy['public-key'] || '');
+    mainConfig.address = String(proxy.ip || proxy.address || '');
+  }
+
+  if (type === 'ssh') {
+    mainConfig.user = String(proxy.user || proxy.username || '');
+    mainConfig.password = String(proxy.password || '');
+  }
+
+  const tlsEnabled = String(proxy.tls || '').toLowerCase() === 'true' || String(proxy.tls || '') === '1';
+  if (tlsEnabled) optionalConfig.security = 'tls';
+  if (proxy['skip-cert-verify'] !== undefined) optionalConfig.allowInsecure = String(proxy['skip-cert-verify']);
+
+  if (proxy['ws-opts.path']) transportMain.path = String(proxy['ws-opts.path']);
+  if (proxy['grpc-opts.grpc-service-name']) transportMain.serviceName = String(proxy['grpc-opts.grpc-service-name']);
+  if (proxy['ws-opts.headers.Host']) transportOptional.host = String(proxy['ws-opts.headers.Host']);
+
+  return makeRow({
+    name: String(proxy.name || `${mappedProtocol}-${mainConfig.server || 'node'}`),
+    protocolId: mappedProtocol,
+    transportId: mappedTransport,
+    mainConfig,
+    optionalConfig,
+    transportMain,
+    transportOptional
+  });
+}
+
+function mapMihomoTypeToProtocol(type) {
+  const map = {
+    ss: 'shadowsocks',
+    socks5: 'socks',
+    wg: 'wireguard'
+  };
+  return map[type] || type;
+}
+
+function mapMihomoNetworkToTransport(network = '') {
+  const net = String(network || '').toLowerCase();
+  const map = {
+    tcp: 'raw',
+    ws: 'websocket'
+  };
+  return map[net] || (net || 'raw');
 }
 
 export function exportRowsToUriText(rows) {
