@@ -1,0 +1,20 @@
+export const mihomoInbounds = [
+  { id: 'port', label: 'Port' },
+  { id: 'tun', label: 'TUN' },
+  { id: 'http', label: 'HTTP Listener' },
+  { id: 'socks', label: 'SOCKS Listener' },
+  { id: 'mixed', label: 'Mixed Listener' },
+  { id: 'redirect', label: 'Redirect Listener' },
+  { id: 'tproxy', label: 'TProxy Listener' },
+  { id: 'ss', label: 'SS Listener' },
+  { id: 'vmess', label: 'VMess Listener' },
+  { id: 'vless', label: 'VLESS Listener' },
+  { id: 'trojan', label: 'Trojan Listener' },
+  { id: 'anytls', label: 'AnyTLS Listener' },
+  { id: 'mieru', label: 'Mieru Listener' },
+  { id: 'sudoku', label: 'Sudoku Listener' },
+  { id: 'tuic-v4', label: 'TUIC v4 Listener' },
+  { id: 'tuic-v5', label: 'TUIC v5 Listener' },
+  { id: 'hysteria2', label: 'Hysteria2 Listener' },
+  { id: 'tunnel', label: 'Tunnel Listener' }
+];
