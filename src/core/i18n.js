@@ -7,13 +7,10 @@ const dictionaries = {
     protocol: 'Protocol',
     search: 'Search by name, protocol, endpoint',
     addProxy: 'Add Proxy',
-    exportJson: 'Export JSON',
-    importJson: 'Import JSON',
     activeEngine: 'Active engine',
     notEnabled: 'This engine is planned and not enabled yet.',
     inbounds: 'Inbounds',
     outbounds: 'Outbounds',
-    transports: 'Transports',
     actions: 'Actions',
     edit: 'Edit',
     delete: 'Delete',
@@ -26,21 +23,26 @@ const dictionaries = {
     editProxy: 'Edit Proxy',
     mainFields: 'Main fields',
     optionalFields: 'Optional fields',
-    transport: 'Transport'
+    transport: 'Transport',
+    importPlaceholder: 'Paste messy text, proxy links, or .conf content here',
+    importFromText: 'Parse Text',
+    importClipboard: 'Import Clipboard',
+    importFile: 'Import File (.txt/.json/.conf)',
+    importUrl: 'Import Subscription URL',
+    subscriptionUrl: 'https://example.com/subscription',
+    copyOutput: 'Copy Output',
+    downloadOutput: 'Download Output File'
   }
 };
 
 export function createI18n(defaultLocale = 'en') {
   let locale = defaultLocale;
-
   return {
     t(key) {
       return dictionaries[locale]?.[key] ?? key;
     },
     setLocale(nextLocale) {
-      if (dictionaries[nextLocale]) {
-        locale = nextLocale;
-      }
+      if (dictionaries[nextLocale]) locale = nextLocale;
     },
     get locale() {
       return locale;
