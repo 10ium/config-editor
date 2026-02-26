@@ -1,4 +1,7 @@
-const SUPPORTED_SCHEMES = new Set(['vless', 'vmess', 'trojan', 'ss', 'socks', 'wireguard', 'hysteria2', 'hysteria']);
+const SUPPORTED_SCHEMES = new Set([
+  'vless', 'vmess', 'trojan', 'ss', 'ssr', 'socks', 'socks5',
+  'wireguard', 'wg', 'hysteria2', 'hy2', 'hysteria', 'tuic', 'snell', 'ssh', 'anytls', 'http', 'https'
+]);
 
 export function parseFlexibleInput(text) {
   const direct = parseMixedInput(text);
@@ -59,40 +62,41 @@ function parseUri(input) {
 
   if (scheme === 'vmess') return parseVmess(clean);
   if (scheme === 'ss') return parseSs(clean);
-  if (scheme === 'socks') return parseSocks(clean);
-  if (scheme === 'wireguard') return parseWireguard(clean);
-  if (scheme === 'hysteria2' || scheme === 'hysteria') return parseHysteria(clean);
+  if (scheme === 'ssr') return parseSsr(clean);
+  if (scheme === 'socks' || scheme === 'socks5') return parseSocks(clean);
+  if (scheme === 'wireguard' || scheme === 'wg') return parseWireguard(clean);
+  if (scheme === 'hysteria2' || scheme === 'hy2' || scheme === 'hysteria') return parseHysteria(clean, scheme);
+  if (scheme === 'tuic') return parseTuic(clean);
+  if (scheme === 'snell') return parseSnell(clean);
+  if (scheme === 'ssh') return parseSsh(clean);
+  if (scheme === 'http' || scheme === 'https') return parseHttp(clean);
   return parseUrlLike(clean, scheme);
 }
 
 function parseVmess(input) {
   const payload = input.slice('vmess://'.length);
   const decoded = tryDecodeBase64(payload);
-  if (!decoded) {
-    return parseUrlLike(input, 'vmess');
-  }
+  if (!decoded) return parseUrlLike(input, 'vmess');
 
   try {
     const json = JSON.parse(decoded);
     const net = String(json.net || 'tcp').toLowerCase();
     const tlsRaw = String(json.tls || '').toLowerCase();
-    const security = tlsRaw && tlsRaw !== 'none' ? tlsRaw : 'none';
-    return {
-      id: createId(),
-      engineId: 'xray',
+    const security = tlsRaw && tlsRaw !== 'none' && tlsRaw !== 'false' ? tlsRaw : 'none';
+
+    return makeRow({
       name: json.ps || json.name || `vmess-${json.add || 'node'}`,
-      direction: 'outbound',
       protocolId: 'vmess',
       transportId: normalizeTransport(net),
       mainConfig: {
         server: String(json.add || ''),
         port: Number(json.port || 0),
-        id: String(json.id || ''),
-        alterId: String(json.aid ?? json.alterId ?? '0'),
-        security: String(json.scy || json.security || 'auto')
+        id: String(json.id || '')
       },
       optionalConfig: {
         security,
+        scy: String(json.scy || json.security || 'auto'),
+        alterId: String(json.aid ?? json.alterId ?? '0'),
         sni: String(json.sni || ''),
         alpn: String(json.alpn || ''),
         fp: String(json.fp || ''),
@@ -109,7 +113,7 @@ function parseVmess(input) {
         host: String(json.host || ''),
         type: String(json.type || '')
       }
-    };
+    });
   } catch {
     return null;
   }
@@ -118,27 +122,26 @@ function parseVmess(input) {
 function parseUrlLike(input, scheme) {
   try {
     const url = new URL(input);
-    const host = url.hostname;
-    const port = url.port ? Number(url.port) : undefined;
     const q = url.searchParams;
     const type = (q.get('type') || q.get('network') || 'raw').toLowerCase();
-    const transportId = normalizeTransport(type);
-    const name = decodeURIComponent((url.hash || '').replace(/^#/, '')) || `${scheme}-${host}`;
 
-    const mainConfig = { server: host };
-    if (port) mainConfig.port = port;
+    const mainConfig = { server: url.hostname };
+    if (url.port) mainConfig.port = Number(url.port);
 
     if (scheme === 'vless' || scheme === 'vmess') {
       mainConfig.id = decodeURIComponent(url.username || '');
       if (q.get('encryption')) mainConfig.encryption = q.get('encryption');
     }
 
-    if (scheme === 'trojan') {
-      mainConfig.password = decodeURIComponent(url.username || '');
+    if (scheme === 'trojan' || scheme === 'anytls') {
+      mainConfig.password = decodeURIComponent(url.username || url.password || '');
     }
 
     const optionalConfig = {};
-    copyQuery(q, optionalConfig, ['security', 'sni', 'alpn', 'fp', 'flow', 'insecure', 'allowInsecure', 'host', 'headerType', 'obfs', 'obfs-password', 'pbk', 'sid']);
+    copyQuery(q, optionalConfig, [
+      'security', 'sni', 'alpn', 'fp', 'flow', 'insecure', 'allowInsecure',
+      'host', 'headerType', 'obfs', 'obfs-password', 'pbk', 'sid', 'serviceName', 'peer', 'servername'
+    ]);
 
     const transportMain = {};
     const transportOptional = {};
@@ -146,18 +149,15 @@ function parseUrlLike(input, scheme) {
     if (q.get('serviceName')) transportMain.serviceName = q.get('serviceName');
     if (q.get('host')) transportOptional.host = q.get('host');
 
-    return {
-      id: createId(),
-      engineId: 'xray',
-      name,
-      direction: 'outbound',
+    return makeRow({
+      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `${scheme}-${url.hostname}`,
       protocolId: scheme,
-      transportId,
+      transportId: normalizeTransport(type),
       mainConfig,
       optionalConfig,
       transportMain,
       transportOptional
-    };
+    });
   } catch {
     return null;
   }
@@ -178,38 +178,53 @@ function parseSs(input) {
     [userInfo, serverPart] = decoded.split('@');
   }
 
-  let method = '';
-  let password = '';
   const decodedUser = userInfo.includes(':') ? userInfo : tryDecodeBase64(userInfo) || userInfo;
-  if (decodedUser.includes(':')) {
-    const idx = decodedUser.indexOf(':');
-    method = decodedUser.slice(0, idx);
-    password = decodedUser.slice(idx + 1);
-  }
+  if (!decodedUser.includes(':')) return null;
+  const idx = decodedUser.indexOf(':');
+  const method = decodedUser.slice(0, idx);
+  const password = decodedUser.slice(idx + 1);
 
   const [server, portStr] = serverPart.split(':');
-  const name = decodeURIComponent(hashPart || '') || `ss-${server}`;
-
-  return {
-    id: createId(),
-    engineId: 'xray',
-    name,
-    direction: 'outbound',
+  return makeRow({
+    name: decodeURIComponent(hashPart || '') || `ss-${server}`,
     protocolId: 'shadowsocks',
     transportId: 'raw',
-    mainConfig: { server, port: Number(portStr || 0), method, password },
-    optionalConfig: {},
-    transportMain: {},
-    transportOptional: {}
-  };
+    mainConfig: { server, port: Number(portStr || 0), method, password }
+  });
+}
+
+function parseSsr(input) {
+  const decoded = tryDecodeBase64(input.slice('ssr://'.length));
+  if (!decoded) return null;
+
+  const [left, paramsPart] = decoded.split('/?');
+  const parts = left.split(':');
+  if (parts.length < 6) return null;
+
+  const [server, port, protocol, method, obfs, passwordB64] = parts;
+  const password = tryDecodeBase64(passwordB64) || passwordB64;
+  const params = new URLSearchParams(paramsPart || '');
+  const remarks = params.get('remarks');
+
+  return makeRow({
+    name: safeDecode(tryDecodeBase64(remarks || '') || remarks || `ssr-${server}`),
+    protocolId: 'ssr',
+    transportId: 'raw',
+    mainConfig: { server, port: Number(port || 0), method, password },
+    optionalConfig: {
+      protocol,
+      obfs,
+      'protocol-param': safeDecode(tryDecodeBase64(params.get('protoparam') || '') || params.get('protoparam') || ''),
+      'obfs-param': safeDecode(tryDecodeBase64(params.get('obfsparam') || '') || params.get('obfsparam') || '')
+    }
+  });
 }
 
 function parseSocks(input) {
   try {
-    const url = new URL(input);
+    const url = new URL(input.replace(/^socks5:\/\//i, 'socks://'));
     const server = url.hostname;
     const port = Number(url.port || 1080);
-    const hash = decodeURIComponent((url.hash || '').replace(/^#/, ''));
     const userRaw = decodeURIComponent(url.username || '');
     const decoded = userRaw.includes(':') ? userRaw : tryDecodeBase64(userRaw) || userRaw;
     let user = '';
@@ -220,46 +235,36 @@ function parseSocks(input) {
       pass = decoded.slice(idx + 1);
     }
 
-    return {
-      id: createId(),
-      engineId: 'xray',
-      name: hash || `socks-${server}`,
-      direction: 'outbound',
+    return makeRow({
+      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `socks-${server}`,
       protocolId: 'socks',
       transportId: 'raw',
       mainConfig: { server, port },
-      optionalConfig: { user, pass },
-      transportMain: {},
-      transportOptional: {}
-    };
+      optionalConfig: { user, pass }
+    });
   } catch {
     return null;
   }
 }
 
-function parseHysteria(input) {
+function parseHysteria(input, scheme) {
   try {
-    const url = new URL(input);
-    const server = url.hostname;
-    const port = Number(url.port || 443);
+    const url = new URL(input.replace(/^hy2:\/\//i, 'hysteria2://'));
     const q = url.searchParams;
-    return {
-      id: createId(),
-      engineId: 'xray',
-      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `hysteria-${server}`,
-      direction: 'outbound',
-      protocolId: 'hysteria',
+    const protocolId = (scheme === 'hysteria2' || scheme === 'hy2') ? 'hysteria2' : 'hysteria';
+
+    return makeRow({
+      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `${protocolId}-${url.hostname}`,
+      protocolId,
       transportId: 'hysteria',
-      mainConfig: { server, port, auth: decodeURIComponent(url.username || '') },
+      mainConfig: { server: url.hostname, port: Number(url.port || 443), auth: decodeURIComponent(url.username || '') },
       optionalConfig: {
         security: q.get('security') || '',
         obfs: q.get('obfs') || '',
         'obfs-password': q.get('obfs-password') || '',
-        sni: q.get('sni') || ''
-      },
-      transportMain: {},
-      transportOptional: {}
-    };
+        sni: q.get('sni') || q.get('peer') || ''
+      }
+    });
   } catch {
     return null;
   }
@@ -267,19 +272,16 @@ function parseHysteria(input) {
 
 function parseWireguard(input) {
   try {
-    const url = new URL(input);
+    const url = new URL(input.replace(/^wg:\/\//i, 'wireguard://'));
     const q = url.searchParams;
-    return {
-      id: createId(),
-      engineId: 'xray',
+    return makeRow({
       name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || 'wireguard',
-      direction: 'outbound',
       protocolId: 'wireguard',
       transportId: 'raw',
       mainConfig: {
-        secretKey: decodeURIComponent(url.username || ''),
-        address: decodeURIComponent(q.get('address') || ''),
-        publicKey: decodeURIComponent(q.get('publickey') || ''),
+        secretKey: decodeURIComponent(url.username || q.get('private-key') || ''),
+        address: decodeURIComponent(q.get('address') || q.get('ip') || ''),
+        publicKey: decodeURIComponent(q.get('publickey') || q.get('public-key') || ''),
         server: url.hostname,
         port: Number(url.port || 0)
       },
@@ -287,10 +289,94 @@ function parseWireguard(input) {
         reserved: decodeURIComponent(q.get('reserved') || ''),
         mtu: q.get('mtu') || '',
         keepalive: q.get('keepalive') || ''
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseTuic(input) {
+  try {
+    const url = new URL(input);
+    const q = url.searchParams;
+    return makeRow({
+      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `tuic-${url.hostname}`,
+      protocolId: 'tuic',
+      transportId: 'raw',
+      mainConfig: {
+        server: url.hostname,
+        port: Number(url.port || 443),
+        id: decodeURIComponent(url.username || ''),
+        password: decodeURIComponent(url.password || '')
       },
-      transportMain: {},
-      transportOptional: {}
-    };
+      optionalConfig: {
+        sni: q.get('sni') || '',
+        alpn: q.get('alpn') || ''
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseSnell(input) {
+  try {
+    const url = new URL(input);
+    return makeRow({
+      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `snell-${url.hostname}`,
+      protocolId: 'snell',
+      transportId: 'raw',
+      mainConfig: {
+        server: url.hostname,
+        port: Number(url.port || 443),
+        password: decodeURIComponent(url.username || url.searchParams.get('psk') || '')
+      },
+      optionalConfig: {
+        version: url.searchParams.get('version') || '2'
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseSsh(input) {
+  try {
+    const url = new URL(input);
+    return makeRow({
+      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `ssh-${url.hostname}`,
+      protocolId: 'ssh',
+      transportId: 'raw',
+      mainConfig: {
+        server: url.hostname,
+        port: Number(url.port || 22),
+        user: decodeURIComponent(url.username || ''),
+        password: decodeURIComponent(url.password || '')
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseHttp(input) {
+  try {
+    const url = new URL(input);
+    return makeRow({
+      name: decodeURIComponent((url.hash || '').replace(/^#/, '')) || `http-${url.hostname}`,
+      protocolId: 'http',
+      transportId: 'raw',
+      mainConfig: {
+        server: url.hostname,
+        port: Number(url.port || (url.protocol === 'https:' ? 443 : 80))
+      },
+      optionalConfig: {
+        user: decodeURIComponent(url.username || ''),
+        pass: decodeURIComponent(url.password || ''),
+        security: url.protocol === 'https:' ? 'tls' : 'none'
+      }
+    });
   } catch {
     return null;
   }
@@ -302,11 +388,8 @@ function parseWireguardConf(text) {
   const iface = map.Interface || {};
   const peer = map.Peer || {};
   const endpoint = normalizeEndpoint(peer.Endpoint);
-  return {
-    id: createId(),
-    engineId: 'xray',
+  return makeRow({
     name: 'wireguard-conf',
-    direction: 'outbound',
     protocolId: 'wireguard',
     transportId: 'raw',
     mainConfig: {
@@ -320,10 +403,8 @@ function parseWireguardConf(text) {
       mtu: iface.MTU || '',
       dns: iface.DNS || '',
       keepalive: peer.PersistentKeepalive || ''
-    },
-    transportMain: {},
-    transportOptional: {}
-  };
+    }
+  });
 }
 
 function parseIniLike(text) {
@@ -340,9 +421,7 @@ function parseIniLike(text) {
     }
     const eq = line.indexOf('=');
     if (eq < 0 || !section) continue;
-    const key = line.slice(0, eq).trim();
-    const value = line.slice(eq + 1).trim();
-    out[section][key] = value;
+    out[section][line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
   }
   return out;
 }
@@ -371,7 +450,7 @@ function dedupeRows(rows) {
   const seen = new Set();
   const out = [];
   for (const row of rows) {
-    const key = `${row.protocolId}|${row.mainConfig?.server || ''}|${row.mainConfig?.port || ''}|${row.mainConfig?.id || row.mainConfig?.password || ''}`;
+    const key = `${row.protocolId}|${row.mainConfig?.server || ''}|${row.mainConfig?.port || ''}|${row.mainConfig?.id || row.mainConfig?.password || row.mainConfig?.secretKey || ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(row);
@@ -391,8 +470,7 @@ function toShareUri(row) {
     if (row.optionalConfig?.security) query.set('security', row.optionalConfig.security);
     if (row.optionalConfig?.sni) query.set('sni', row.optionalConfig.sni);
     if (row.optionalConfig?.fp) query.set('fp', row.optionalConfig.fp);
-    const scheme = row.protocolId;
-    return `${scheme}://${cred}@${host}:${port}?${query.toString()}#${encodeURIComponent(row.name || row.protocolId)}`;
+    return `${row.protocolId}://${cred}@${host}:${port}?${query.toString()}#${encodeURIComponent(row.name || row.protocolId)}`;
   }
 
   if (row.protocolId === 'shadowsocks') {
@@ -403,19 +481,35 @@ function toShareUri(row) {
     return `ss://${encoded}@${host}:${port}#${encodeURIComponent(row.name || 'ss')}`;
   }
 
-  if (row.protocolId === 'wireguard') {
-    const query = new URLSearchParams();
-    if (row.mainConfig?.address) query.set('address', row.mainConfig.address);
-    if (row.mainConfig?.publicKey) query.set('publickey', row.mainConfig.publicKey);
-    return `wireguard://${encodeURIComponent(row.mainConfig?.secretKey || '')}@${row.mainConfig?.server || ''}:${row.mainConfig?.port || ''}?${query.toString()}#${encodeURIComponent(row.name || 'wireguard')}`;
-  }
-
   return '';
 }
 
 function reverseTransport(id) {
   const map = { websocket: 'ws' };
   return map[id] || id;
+}
+
+function makeRow({ name, protocolId, transportId = 'raw', mainConfig = {}, optionalConfig = {}, transportMain = {}, transportOptional = {} }) {
+  return {
+    id: createId(),
+    engineId: 'xray',
+    name: name || `${protocolId}-${mainConfig.server || 'node'}`,
+    direction: 'outbound',
+    protocolId,
+    transportId,
+    mainConfig,
+    optionalConfig,
+    transportMain,
+    transportOptional
+  };
+}
+
+function safeDecode(v) {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
 }
 
 function tryDecodeBase64(input) {
