@@ -194,3 +194,19 @@ th {
 .toolbar {
   flex-wrap: wrap;
 }
+
+
+.action-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.toolbar button {
+  width: auto;
+}
+
+@media (max-width: 900px) {
+  .toolbar button {
+    width: 100%;
+  }
+}
