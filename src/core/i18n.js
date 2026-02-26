@@ -24,14 +24,23 @@ const dictionaries = {
     mainFields: 'Main fields',
     optionalFields: 'Optional fields',
     transport: 'Transport',
-    importPlaceholder: 'Paste messy text, proxy links, or .conf content here',
-    importFromText: 'Parse Text',
+    importPlaceholder: 'Paste plain text, proxy links, WireGuard .conf, or Base64 payload here',
+    importFromText: 'Parse Text/Base64',
     importClipboard: 'Import Clipboard',
     importFile: 'Import File (.txt/.json/.conf)',
     importUrl: 'Import Subscription URL',
     subscriptionUrl: 'https://example.com/subscription',
     copyOutput: 'Copy Output',
-    downloadOutput: 'Download Output File'
+    downloadOutput: 'Download Output File',
+    perPage: 'Rows per page',
+    renamePrefix: 'Rename prefix',
+    uniqueNames: 'Make names unique with incremental number prefix',
+    renameSelected: 'Rename Selected',
+    renameAll: 'Rename All',
+    selectedCount: 'Selected',
+    page: 'Page',
+    prev: 'Prev',
+    next: 'Next'
   }
 };
 
