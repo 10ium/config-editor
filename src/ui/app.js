@@ -67,6 +67,9 @@ function renderPanel(i18n, rows, totalCount, state) {
   return `<section class="card table-wrap" style="margin-top:16px;">
       <div style="padding:12px" class="toolbar">
         <button class="primary" data-action="add">${i18n.t('addProxy')}</button>
+        <button class="ghost" data-action="selectAllFiltered">${i18n.t('selectAllFiltered')}</button>
+        <button class="ghost" data-action="clearSelection">${i18n.t('clearSelection')}</button>
+        <button class="danger" data-action="deleteSelected">${i18n.t('deleteSelected')}</button>
         <button class="ghost" data-action="renameSelected">${i18n.t('renameSelected')}</button>
         <button class="ghost" data-action="renameAll">${i18n.t('renameAll')}</button>
         <button class="ghost" data-action="copyOut">${i18n.t('copyOutput')}</button>
@@ -83,7 +86,7 @@ function renderPanel(i18n, rows, totalCount, state) {
           <button data-action="importUrl">${i18n.t('importUrl')}</button>
         </div>
       </div>
-      ${rows.length ? renderTable(i18n, rows, state.selectedIds) : `<div class="empty">${i18n.t('noRows')}</div>`}
+      ${rows.length ? renderTable(i18n, rows, state.selectedIds, rows.every((item) => state.selectedIds.has(item.id))) : `<div class="empty">${i18n.t('noRows')}</div>`}
       <div class="toolbar" style="padding:12px;justify-content:space-between;">
         <button data-action="prevPage">${i18n.t('prev')}</button>
         <span class="footer">${i18n.t('page')} ${state.page}</span>
@@ -92,10 +95,10 @@ function renderPanel(i18n, rows, totalCount, state) {
     </section>`;
 }
 
-function renderTable(i18n, rows, selectedIds) {
-  return `<table><thead><tr><th><input type="checkbox" data-action="selectVisible" style="width:auto" /></th><th>${i18n.t('name')}</th><th>${i18n.t('direction')}</th><th>${i18n.t('protocol')}</th><th>${i18n.t('transport')}</th><th>${i18n.t('endpoint')}</th><th>${i18n.t('actions')}</th></tr></thead><tbody>${rows
+function renderTable(i18n, rows, selectedIds, allVisibleSelected) {
+  return `<table><thead><tr><th><input type="checkbox" data-action="selectVisible" style="width:auto" ${allVisibleSelected ? 'checked' : ''} /></th><th>${i18n.t('name')}</th><th>${i18n.t('direction')}</th><th>${i18n.t('protocol')}</th><th>${i18n.t('transport')}</th><th>${i18n.t('endpoint')}</th><th>${i18n.t('actions')}</th></tr></thead><tbody>${rows
     .map(
-      (row) => `<tr><td><input type="checkbox" data-action="toggleSelect" data-id="${row.id}" style="width:auto" ${selectedIds.has(row.id) ? 'checked' : ''} /></td><td>${escapeHtml(row.name || '-')}</td><td>${escapeHtml(row.direction)}</td><td>${escapeHtml(row.protocolId)}</td><td>${escapeHtml(row.transportId)}</td><td>${escapeHtml(readEndpoint(row))}</td><td><button data-action="edit" data-id="${row.id}">${i18n.t('edit')}</button><button class="danger" data-action="delete" data-id="${row.id}">${i18n.t('delete')}</button></td></tr>`
+      (row) => `<tr><td><input type="checkbox" data-action="toggleSelect" data-id="${row.id}" style="width:auto" ${selectedIds.has(row.id) ? 'checked' : ''} /></td><td class="cell" title="${escapeHtml(row.name || '-')}">${escapeHtml(row.name || '-')}</td><td class="cell" title="${escapeHtml(row.direction)}">${escapeHtml(row.direction)}</td><td class="cell" title="${escapeHtml(row.protocolId)}">${escapeHtml(row.protocolId)}</td><td class="cell" title="${escapeHtml(row.transportId)}">${escapeHtml(row.transportId)}</td><td class="cell" title="${escapeHtml(readEndpoint(row))}">${escapeHtml(readEndpoint(row))}</td><td class="actions-cell"><button data-action="edit" data-id="${row.id}">${i18n.t('edit')}</button><button class="danger" data-action="delete" data-id="${row.id}">${i18n.t('delete')}</button></td></tr>`
     )
     .join('')}</tbody></table>`;
 }
@@ -307,6 +310,25 @@ function bindEvents(state, render) {
     } catch {
       alert('Subscription fetch failed.');
     }
+  });
+
+  on('selectAllFiltered', () => {
+    const filtered = filterRows(state.rows, state);
+    filtered.forEach((row) => state.selectedIds.add(row.id));
+    render();
+  });
+
+  on('clearSelection', () => {
+    state.selectedIds.clear();
+    render();
+  });
+
+  on('deleteSelected', () => {
+    if (!state.selectedIds.size) return alert('No selected rows.');
+    state.rows = state.rows.filter((row) => !state.selectedIds.has(row.id));
+    state.selectedIds.clear();
+    persist(state);
+    render();
   });
 
   on('renameSelected', () => {
