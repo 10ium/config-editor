@@ -1,5 +1,29 @@
 const SUPPORTED_SCHEMES = new Set(['vless', 'vmess', 'trojan', 'ss', 'socks', 'wireguard', 'hysteria2', 'hysteria']);
 
+export function parseFlexibleInput(text) {
+  const direct = parseMixedInput(text);
+  if (direct.length) return direct;
+
+  const normalized = text.trim();
+  const decoded = tryDecodeBase64(normalized);
+  if (decoded) {
+    const parsedDecoded = parseMixedInput(decoded);
+    if (parsedDecoded.length) return parsedDecoded;
+  }
+
+  const maybeLineDecoded = normalized
+    .split(/\r?\n/)
+    .map((line) => tryDecodeBase64(line.trim()) || '')
+    .join('\n');
+
+  if (maybeLineDecoded.trim()) {
+    const parsedLineDecoded = parseMixedInput(maybeLineDecoded);
+    if (parsedLineDecoded.length) return parsedLineDecoded;
+  }
+
+  return [];
+}
+
 export function parseMixedInput(text) {
   const rows = [];
   const uriMatches = text.match(/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s"'<>]+/g) ?? [];
@@ -226,6 +250,7 @@ function parseWireguardConf(text) {
   if (!map.Interface && !map.Peer) return null;
   const iface = map.Interface || {};
   const peer = map.Peer || {};
+  const endpoint = normalizeEndpoint(peer.Endpoint);
   return {
     id: createId(),
     engineId: 'xray',
@@ -237,8 +262,8 @@ function parseWireguardConf(text) {
       secretKey: iface.PrivateKey || '',
       address: iface.Address || '',
       publicKey: peer.PublicKey || '',
-      server: normalizeEndpoint(peer.Endpoint).host,
-      port: normalizeEndpoint(peer.Endpoint).port || ''
+      server: endpoint.host,
+      port: endpoint.port || ''
     },
     optionalConfig: {
       mtu: iface.MTU || '',
@@ -280,16 +305,7 @@ function normalizeEndpoint(endpoint = '') {
 }
 
 function normalizeTransport(value) {
-  const map = {
-    ws: 'websocket',
-    grpc: 'grpc',
-    httpupgrade: 'httpupgrade',
-    xhttp: 'xhttp',
-    mkcp: 'mkcp',
-    tcp: 'raw',
-    raw: 'raw',
-    hysteria: 'hysteria'
-  };
+  const map = { ws: 'websocket', grpc: 'grpc', httpupgrade: 'httpupgrade', xhttp: 'xhttp', mkcp: 'mkcp', tcp: 'raw', raw: 'raw', hysteria: 'hysteria' };
   return map[value] || 'raw';
 }
 
@@ -353,7 +369,7 @@ function reverseTransport(id) {
 
 function tryDecodeBase64(input) {
   try {
-    const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
+    const normalized = input.replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
     const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
     return atob(padded);
   } catch {
