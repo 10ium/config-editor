@@ -88,6 +88,7 @@ button.danger {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 th,
@@ -95,6 +96,8 @@ td {
   padding: 12px;
   border-bottom: 1px solid var(--line);
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 th {
@@ -170,4 +173,24 @@ th {
   .modal-grid {
     grid-template-columns: 1fr;
   }
+}
+
+
+.cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.actions-cell {
+  white-space: nowrap;
+}
+
+.actions-cell button {
+  width: auto;
+  margin-right: 6px;
+}
+
+.toolbar {
+  flex-wrap: wrap;
 }
