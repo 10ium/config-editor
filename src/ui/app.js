@@ -2,6 +2,7 @@ import { createI18n } from '../core/i18n.js';
 import { loadRows, saveRows } from '../core/storage.js';
 import { engines, getEngine } from '../engines/manifest.js';
 import { exportRowsToUriText, parseFlexibleInput, parseSubscriptionPayload } from '../core/parser.js';
+import { adaptRowsToEngine, toMihomoYaml } from '../core/converter.js';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -262,7 +263,7 @@ function bindEvents(state, render) {
   on('parseText', () => {
     const parsed = parseFlexibleInput(state.importText);
     if (!parsed.length) return alert('No supported proxies found.');
-    state.rows = mergeRows(state.rows, parsed);
+    state.rows = mergeRows(state.rows, adaptRowsToEngine(parsed, state.engineId));
     persist(state);
     render();
   });
@@ -272,7 +273,7 @@ function bindEvents(state, render) {
       const text = await navigator.clipboard.readText();
       state.importText = text;
       const parsed = parseFlexibleInput(text);
-      state.rows = mergeRows(state.rows, parsed);
+      state.rows = mergeRows(state.rows, adaptRowsToEngine(parsed, state.engineId));
       persist(state);
       render();
     } catch {
@@ -290,7 +291,7 @@ function bindEvents(state, render) {
       const text = await file.text();
       try {
         const rows = file.name.endsWith('.json') ? normalizeRows(JSON.parse(text)) : parseFlexibleInput(text);
-        state.rows = mergeRows(state.rows, rows);
+        state.rows = mergeRows(state.rows, adaptRowsToEngine(rows, state.engineId));
         state.importText = text;
         persist(state);
         render();
@@ -307,7 +308,7 @@ function bindEvents(state, render) {
       const res = await fetch(state.importUrl.trim());
       const text = await res.text();
       const parsed = parseSubscriptionPayload(text);
-      state.rows = mergeRows(state.rows, parsed);
+      state.rows = mergeRows(state.rows, adaptRowsToEngine(parsed, state.engineId));
       state.importText = text;
       persist(state);
       render();
@@ -352,7 +353,7 @@ function bindEvents(state, render) {
 
   on('copyOut', async () => {
     const sourceRows = state.selectedIds.size ? state.rows.filter((row) => state.selectedIds.has(row.id)) : state.rows;
-    const text = exportRowsToUriText(sourceRows);
+    const text = state.engineId === 'mihomo' ? toMihomoYaml(sourceRows) : exportRowsToUriText(sourceRows);
     try {
       await navigator.clipboard.writeText(text);
       alert('Output copied to clipboard.');
@@ -363,12 +364,13 @@ function bindEvents(state, render) {
 
   on('downloadOut', () => {
     const sourceRows = state.selectedIds.size ? state.rows.filter((row) => state.selectedIds.has(row.id)) : state.rows;
-    const text = exportRowsToUriText(sourceRows);
+    const isMihomo = state.engineId === 'mihomo';
+    const text = isMihomo ? toMihomoYaml(sourceRows) : exportRowsToUriText(sourceRows);
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'proxies.txt';
+    a.download = isMihomo ? 'mihomo-proxies.yaml' : 'proxies.txt';
     a.click();
     URL.revokeObjectURL(url);
   });
@@ -426,9 +428,19 @@ function getProtocolOptions(engine, direction) {
 function getProtocolSchema(engine, direction, protocolId) {
   const found = getProtocolOptions(engine, direction).find((item) => item.id === protocolId);
   if (found) {
-    return { ...found, allowedTransports: found.allowedTransports?.length ? found.allowedTransports : defaultAllowedTransports(direction, protocolId) };
+    if (found.allowedTransports?.length) {
+      return found;
+    }
+    if (engine.id === 'xray') {
+      return { ...found, allowedTransports: defaultAllowedTransports(direction, protocolId) };
+    }
+    return { ...found, allowedTransports: engine.protocols.transports.map((item) => item.id) };
   }
-  return { primaryFields: [], optionalFields: [], allowedTransports: defaultAllowedTransports(direction, protocolId) };
+
+  const fallback = engine.id === 'xray'
+    ? defaultAllowedTransports(direction, protocolId)
+    : engine.protocols.transports.map((item) => item.id);
+  return { primaryFields: [], optionalFields: [], allowedTransports: fallback };
 }
 
 function defaultAllowedTransports(direction, protocolId) {
@@ -477,18 +489,31 @@ function readSecurity(row) {
 
 function normalizeRows(rows) {
   if (!Array.isArray(rows)) return [];
-  return rows.map((row) => ({
-    id: row.id || uid(),
-    engineId: row.engineId || 'xray',
-    name: row.name || row.tag || '',
-    direction: row.direction || 'outbound',
-    protocolId: row.protocolId || row.protocol || 'vless',
-    transportId: row.transportId || row.transport || 'raw',
-    mainConfig: row.mainConfig || { server: row.host || '', port: row.port || '' },
-    optionalConfig: row.optionalConfig || {},
-    transportMain: row.transportMain || {},
-    transportOptional: row.transportOptional || {}
-  }));
+  return rows.map((row) => {
+    const protocolId = row.protocolId || row.protocol || 'vless';
+    const mainConfig = row.mainConfig || { server: row.host || '', port: row.port || '' };
+    const optionalConfig = { ...(row.optionalConfig || {}) };
+
+    if (protocolId === 'vmess') {
+      if (!optionalConfig.scy && mainConfig.security) optionalConfig.scy = mainConfig.security;
+      if (!optionalConfig.alterId && mainConfig.alterId) optionalConfig.alterId = mainConfig.alterId;
+      delete mainConfig.security;
+      delete mainConfig.alterId;
+    }
+
+    return {
+      id: row.id || uid(),
+      engineId: row.engineId || 'xray',
+      name: row.name || row.tag || '',
+      direction: row.direction || 'outbound',
+      protocolId,
+      transportId: row.transportId || row.transport || 'raw',
+      mainConfig,
+      optionalConfig,
+      transportMain: row.transportMain || {},
+      transportOptional: row.transportOptional || {}
+    };
+  });
 }
 
 function mergeRows(baseRows, incomingRows) {
