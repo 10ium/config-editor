@@ -1,7 +1,7 @@
 import { createI18n } from '../core/i18n.js';
 import { loadRows, saveRows } from '../core/storage.js';
 import { engines, getEngine } from '../engines/manifest.js';
-import { exportRowsToUriText, parseMixedInput, parseSubscriptionPayload } from '../core/parser.js';
+import { exportRowsToUriText, parseFlexibleInput, parseSubscriptionPayload } from '../core/parser.js';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -12,16 +12,24 @@ export function createApp(root) {
     direction: 'all',
     protocol: 'all',
     search: '',
+    perPage: 10,
+    page: 1,
     rows: normalizeRows(loadRows()),
+    selectedIds: new Set(),
     modalOpen: false,
     draft: null,
     importText: '',
-    importUrl: ''
+    importUrl: '',
+    renameText: '',
+    uniqueNames: false
   };
 
   const render = () => {
     const engine = getEngine(state.engineId);
     const filteredRows = filterRows(state.rows, state);
+    const pageRows = paginate(filteredRows, state.page, state.perPage);
+    const pageCount = Math.max(1, Math.ceil(filteredRows.length / state.perPage));
+    if (state.page > pageCount) state.page = pageCount;
 
     root.innerHTML = `
       <main class="container">
@@ -38,9 +46,12 @@ export function createApp(root) {
           <label>${i18n.t('direction')}<select data-field="direction"><option value="all">${i18n.t('all')}</option><option value="inbound" ${state.direction === 'inbound' ? 'selected' : ''}>${i18n.t('inbounds')}</option><option value="outbound" ${state.direction === 'outbound' ? 'selected' : ''}>${i18n.t('outbounds')}</option></select></label>
           <label>${i18n.t('protocol')}<select data-field="protocol"><option value="all">${i18n.t('all')}</option>${getProtocolOptions(engine, state.direction).map((item) => `<option value="${item.id}" ${item.id === state.protocol ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label>
           <label>${i18n.t('search')}<input data-field="search" value="${escapeHtml(state.search)}" placeholder="${i18n.t('search')}" /></label>
+          <label>${i18n.t('perPage')}<select data-field="perPage">${[10,20,50,100].map((n)=>`<option value="${n}" ${state.perPage===n?'selected':''}>${n}</option>`).join('')}</select></label>
+          <label>${i18n.t('renamePrefix')}<input data-field="renameText" value="${escapeHtml(state.renameText)}" placeholder="${i18n.t('renamePrefix')}" /></label>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:26px;"><input type="checkbox" data-field="uniqueNames" ${state.uniqueNames ? 'checked' : ''} style="width:auto;"/>${i18n.t('uniqueNames')}</label>
         </section>
 
-        ${engine.enabled ? renderPanel(i18n, filteredRows, state) : `<div class="card empty">${i18n.t('notEnabled')}</div>`}
+        ${engine.enabled ? renderPanel(i18n, pageRows, filteredRows.length, state) : `<div class="card empty">${i18n.t('notEnabled')}</div>`}
       </main>
       ${state.modalOpen && state.draft ? renderModal(i18n, engine, state.draft) : ''}
     `;
@@ -51,13 +62,17 @@ export function createApp(root) {
   render();
 }
 
-function renderPanel(i18n, rows, state) {
+function renderPanel(i18n, rows, totalCount, state) {
+  const selectedCount = state.selectedIds.size;
   return `<section class="card table-wrap" style="margin-top:16px;">
       <div style="padding:12px" class="toolbar">
         <button class="primary" data-action="add">${i18n.t('addProxy')}</button>
+        <button class="ghost" data-action="renameSelected">${i18n.t('renameSelected')}</button>
+        <button class="ghost" data-action="renameAll">${i18n.t('renameAll')}</button>
         <button class="ghost" data-action="copyOut">${i18n.t('copyOutput')}</button>
         <button class="ghost" data-action="downloadOut">${i18n.t('downloadOutput')}</button>
       </div>
+      <div style="padding:0 12px 12px;" class="footer">${i18n.t('selectedCount')}: ${selectedCount} / ${totalCount}</div>
       <div style="padding:12px;display:grid;grid-template-columns:2fr 1fr;gap:8px;">
         <textarea data-field="importText" rows="5" placeholder="${i18n.t('importPlaceholder')}">${escapeHtml(state.importText)}</textarea>
         <div style="display:flex;flex-direction:column;gap:8px;">
@@ -68,14 +83,19 @@ function renderPanel(i18n, rows, state) {
           <button data-action="importUrl">${i18n.t('importUrl')}</button>
         </div>
       </div>
-      ${rows.length ? renderTable(i18n, rows) : `<div class="empty">${i18n.t('noRows')}</div>`}
+      ${rows.length ? renderTable(i18n, rows, state.selectedIds) : `<div class="empty">${i18n.t('noRows')}</div>`}
+      <div class="toolbar" style="padding:12px;justify-content:space-between;">
+        <button data-action="prevPage">${i18n.t('prev')}</button>
+        <span class="footer">${i18n.t('page')} ${state.page}</span>
+        <button data-action="nextPage">${i18n.t('next')}</button>
+      </div>
     </section>`;
 }
 
-function renderTable(i18n, rows) {
-  return `<table><thead><tr><th>${i18n.t('name')}</th><th>${i18n.t('direction')}</th><th>${i18n.t('protocol')}</th><th>${i18n.t('transport')}</th><th>${i18n.t('endpoint')}</th><th>${i18n.t('actions')}</th></tr></thead><tbody>${rows
+function renderTable(i18n, rows, selectedIds) {
+  return `<table><thead><tr><th><input type="checkbox" data-action="selectVisible" style="width:auto" /></th><th>${i18n.t('name')}</th><th>${i18n.t('direction')}</th><th>${i18n.t('protocol')}</th><th>${i18n.t('transport')}</th><th>${i18n.t('endpoint')}</th><th>${i18n.t('actions')}</th></tr></thead><tbody>${rows
     .map(
-      (row) => `<tr><td>${escapeHtml(row.name || '-')}</td><td>${escapeHtml(row.direction)}</td><td>${escapeHtml(row.protocolId)}</td><td>${escapeHtml(row.transportId)}</td><td>${escapeHtml(readEndpoint(row))}</td><td><button data-action="edit" data-id="${row.id}">${i18n.t('edit')}</button><button class="danger" data-action="delete" data-id="${row.id}">${i18n.t('delete')}</button></td></tr>`
+      (row) => `<tr><td><input type="checkbox" data-action="toggleSelect" data-id="${row.id}" style="width:auto" ${selectedIds.has(row.id) ? 'checked' : ''} /></td><td>${escapeHtml(row.name || '-')}</td><td>${escapeHtml(row.direction)}</td><td>${escapeHtml(row.protocolId)}</td><td>${escapeHtml(row.transportId)}</td><td>${escapeHtml(readEndpoint(row))}</td><td><button data-action="edit" data-id="${row.id}">${i18n.t('edit')}</button><button class="danger" data-action="delete" data-id="${row.id}">${i18n.t('delete')}</button></td></tr>`
     )
     .join('')}</tbody></table>`;
 }
@@ -113,13 +133,22 @@ function renderField(draft, field) {
 
 function bindEvents(state, render) {
   document.querySelectorAll('[data-field]').forEach((control) => {
-    const eventName = control.tagName === 'INPUT' || control.tagName === 'TEXTAREA' ? 'input' : 'change';
+    const inputType = control.getAttribute('type');
+    const eventName = control.tagName === 'SELECT' ? 'change' : 'input';
     control.addEventListener(eventName, (event) => {
       const field = event.currentTarget.dataset.field;
-      state[field] = event.currentTarget.value;
+      if (inputType === 'checkbox') {
+        state[field] = event.currentTarget.checked;
+      } else if (field === 'perPage') {
+        state.perPage = Number(event.currentTarget.value) || 10;
+        state.page = 1;
+      } else {
+        state[field] = event.currentTarget.value;
+      }
       if (field === 'engineId') {
         state.direction = 'all';
         state.protocol = 'all';
+        state.page = 1;
       }
       render();
     });
@@ -132,6 +161,25 @@ function bindEvents(state, render) {
     render();
   });
 
+  document.querySelectorAll('[data-action="toggleSelect"]').forEach((input) => input.addEventListener('change', (event) => {
+    const id = event.currentTarget.dataset.id;
+    if (!id) return;
+    if (event.currentTarget.checked) state.selectedIds.add(id);
+    else state.selectedIds.delete(id);
+  }));
+
+  on('selectVisible', (event) => {
+    const checked = event.currentTarget.checked;
+    document.querySelectorAll('[data-action="toggleSelect"]').forEach((el) => {
+      const id = el.dataset.id;
+      if (!id) return;
+      el.checked = checked;
+      if (checked) state.selectedIds.add(id);
+      else state.selectedIds.delete(id);
+    });
+    render();
+  });
+
   document.querySelectorAll('[data-action="edit"]').forEach((button) => button.addEventListener('click', (event) => {
     const row = state.rows.find((item) => item.id === event.currentTarget.dataset.id);
     if (!row) return;
@@ -141,7 +189,9 @@ function bindEvents(state, render) {
   }));
 
   document.querySelectorAll('[data-action="delete"]').forEach((button) => button.addEventListener('click', (event) => {
-    state.rows = state.rows.filter((row) => row.id !== event.currentTarget.dataset.id);
+    const id = event.currentTarget.dataset.id;
+    state.rows = state.rows.filter((row) => row.id !== id);
+    state.selectedIds.delete(id);
     persist(state);
     render();
   }));
@@ -203,7 +253,7 @@ function bindEvents(state, render) {
   }
 
   on('parseText', () => {
-    const parsed = parseMixedInput(state.importText);
+    const parsed = parseFlexibleInput(state.importText);
     if (!parsed.length) return alert('No supported proxies found.');
     state.rows = mergeRows(state.rows, parsed);
     persist(state);
@@ -214,7 +264,7 @@ function bindEvents(state, render) {
     try {
       const text = await navigator.clipboard.readText();
       state.importText = text;
-      const parsed = parseMixedInput(text);
+      const parsed = parseFlexibleInput(text);
       state.rows = mergeRows(state.rows, parsed);
       persist(state);
       render();
@@ -232,7 +282,7 @@ function bindEvents(state, render) {
       if (!file) return;
       const text = await file.text();
       try {
-        const rows = file.name.endsWith('.json') ? normalizeRows(JSON.parse(text)) : parseMixedInput(text);
+        const rows = file.name.endsWith('.json') ? normalizeRows(JSON.parse(text)) : parseFlexibleInput(text);
         state.rows = mergeRows(state.rows, rows);
         state.importText = text;
         persist(state);
@@ -259,8 +309,24 @@ function bindEvents(state, render) {
     }
   });
 
+  on('renameSelected', () => {
+    const targets = state.rows.filter((row) => state.selectedIds.has(row.id));
+    if (!targets.length) return alert('No selected rows.');
+    bulkRename(targets, state.renameText, state.uniqueNames);
+    persist(state);
+    render();
+  });
+
+  on('renameAll', () => {
+    if (!state.rows.length) return;
+    bulkRename(state.rows, state.renameText, state.uniqueNames);
+    persist(state);
+    render();
+  });
+
   on('copyOut', async () => {
-    const text = exportRowsToUriText(state.rows);
+    const sourceRows = state.selectedIds.size ? state.rows.filter((row) => state.selectedIds.has(row.id)) : state.rows;
+    const text = exportRowsToUriText(sourceRows);
     try {
       await navigator.clipboard.writeText(text);
       alert('Output copied to clipboard.');
@@ -270,7 +336,8 @@ function bindEvents(state, render) {
   });
 
   on('downloadOut', () => {
-    const text = exportRowsToUriText(state.rows);
+    const sourceRows = state.selectedIds.size ? state.rows.filter((row) => state.selectedIds.has(row.id)) : state.rows;
+    const text = exportRowsToUriText(sourceRows);
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -280,9 +347,37 @@ function bindEvents(state, render) {
     URL.revokeObjectURL(url);
   });
 
+  on('prevPage', () => {
+    state.page = Math.max(1, state.page - 1);
+    render();
+  });
+
+  on('nextPage', () => {
+    const filtered = filterRows(state.rows, state);
+    const pageCount = Math.max(1, Math.ceil(filtered.length / state.perPage));
+    state.page = Math.min(pageCount, state.page + 1);
+    render();
+  });
+
   function on(action, handler) {
     document.querySelectorAll(`[data-action="${action}"]`).forEach((button) => button.addEventListener('click', handler));
   }
+}
+
+function bulkRename(rows, prefix, unique) {
+  const base = prefix?.trim() || 'Proxy';
+  rows.forEach((row, index) => {
+    if (unique) {
+      row.name = `${index + 1}-${base}`;
+    } else {
+      row.name = base;
+    }
+  });
+}
+
+function paginate(rows, page, perPage) {
+  const start = (page - 1) * perPage;
+  return rows.slice(start, start + perPage);
 }
 
 function persist(state) {
@@ -310,35 +405,16 @@ function getProtocolSchema(engine, direction, protocolId) {
   return { primaryFields: [], optionalFields: [], allowedTransports: defaultAllowedTransports(direction, protocolId) };
 }
 
-
 function defaultAllowedTransports(direction, protocolId) {
   const inbound = {
-    tunnel: ['raw'],
-    http: ['raw'],
-    shadowsocks: ['raw'],
-    socks: ['raw'],
-    trojan: ['raw','websocket','grpc','httpupgrade','xhttp'],
-    vless: ['raw','websocket','grpc','httpupgrade','xhttp','mkcp'],
-    vmess: ['raw','websocket','grpc','httpupgrade','xhttp','mkcp'],
-    wireguard: ['raw'],
-    tun: ['raw']
+    tunnel: ['raw'], http: ['raw'], shadowsocks: ['raw'], socks: ['raw'], trojan: ['raw', 'websocket', 'grpc', 'httpupgrade', 'xhttp'],
+    vless: ['raw', 'websocket', 'grpc', 'httpupgrade', 'xhttp', 'mkcp'], vmess: ['raw', 'websocket', 'grpc', 'httpupgrade', 'xhttp', 'mkcp'], wireguard: ['raw'], tun: ['raw']
   };
-
   const outbound = {
-    blackhole: ['raw'],
-    dns: ['raw'],
-    freedom: ['raw'],
-    http: ['raw'],
-    loopback: ['raw'],
-    shadowsocks: ['raw'],
-    socks: ['raw'],
-    trojan: ['raw','websocket','grpc','httpupgrade','xhttp'],
-    vless: ['raw','websocket','grpc','httpupgrade','xhttp','mkcp'],
-    vmess: ['raw','websocket','grpc','httpupgrade','xhttp','mkcp'],
-    wireguard: ['raw'],
-    hysteria: ['hysteria']
+    blackhole: ['raw'], dns: ['raw'], freedom: ['raw'], http: ['raw'], loopback: ['raw'], shadowsocks: ['raw'], socks: ['raw'],
+    trojan: ['raw', 'websocket', 'grpc', 'httpupgrade', 'xhttp'], vless: ['raw', 'websocket', 'grpc', 'httpupgrade', 'xhttp', 'mkcp'],
+    vmess: ['raw', 'websocket', 'grpc', 'httpupgrade', 'xhttp', 'mkcp'], wireguard: ['raw'], hysteria: ['hysteria']
   };
-
   const source = direction === 'inbound' ? inbound : outbound;
   return source[protocolId] || ['raw'];
 }
